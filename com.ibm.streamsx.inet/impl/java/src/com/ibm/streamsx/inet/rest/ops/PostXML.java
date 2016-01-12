@@ -9,17 +9,17 @@ import com.ibm.streams.operator.OperatorContext.ContextCheck;
 import com.ibm.streams.operator.StreamingOutput;
 import com.ibm.streams.operator.Type.MetaType;
 import com.ibm.streams.operator.compile.OperatorContextChecker;
+import com.ibm.streams.operator.model.Icons;
 import com.ibm.streams.operator.model.OutputPortSet;
 import com.ibm.streams.operator.model.OutputPorts;
 import com.ibm.streams.operator.model.PrimitiveOperator;
-import com.ibm.streams.operator.model.Icons;
 
 @PrimitiveOperator(name="HTTPXMLInjection", description=PostXML.DESC)
 @OutputPorts({@OutputPortSet(cardinality=1,
 description="Emits a tuple for each POST request on the inject URL with port index 0"),
 @OutputPortSet(optional=true,
 description="Optional additional ports that emit a tuple for each POST request on the inject URL with the corresponding port index")})
-@Icons(location32="impl/java/icons/HTTPXMLInjection_32.gif", location16="impl/java/icons/HTTPXMLInjection_16.gif")
+@Icons(location32="icons/HTTPXMLInjection_32.gif", location16="icons/HTTPXMLInjection_16.gif")
 public class PostXML extends ServletOperator {
 	
 	/**
@@ -35,7 +35,7 @@ public class PostXML extends ServletOperator {
 	}
 	
 	static final String DESC =
-			"Embeds a Jetty web server to allow HTTP POST requests to submit a tuple on " + 
+			"Embeds a Jetty web server to allow HTTP or HTTPS POST requests to submit a tuple on " + 
 			"its output ports. Each output port corresponds to a unique URL comprising the operator name " + 
 			"and the port index.\\n" + 
 			"\\n" + 
@@ -52,6 +52,5 @@ public class PostXML extends ServletOperator {
 			"\\n" + 
 			"**Limitations**:\\n" + 
 			"* Error handling is limited, incorrect URLs can crash the application.\\n" + 
-			"* No security access is provided to the data. This is mainly aimed at demos.";
-
+			"* By default no security access is provided to the data, HTTPS must be explicitly configured.";
 }

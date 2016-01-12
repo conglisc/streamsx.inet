@@ -19,9 +19,17 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 import javax.management.InstanceAlreadyExistsException;
+import javax.management.InstanceNotFoundException;
 import javax.management.JMX;
+import javax.management.MBeanRegistration;
+import javax.management.MBeanRegistrationException;
 import javax.management.MBeanServer;
+import javax.management.MBeanServerDelegate;
+import javax.management.MBeanServerNotification;
+import javax.management.Notification;
+import javax.management.NotificationListener;
 import javax.management.ObjectName;
+import javax.management.relation.MBeanServerNotificationFilter;
 
 import org.eclipse.jetty.server.Handler;
 import org.eclipse.jetty.server.Server;
@@ -30,14 +38,19 @@ import org.eclipse.jetty.server.handler.DefaultHandler;
 import org.eclipse.jetty.server.handler.HandlerList;
 import org.eclipse.jetty.server.handler.ResourceHandler;
 import org.eclipse.jetty.server.nio.SelectChannelConnector;
+import org.eclipse.jetty.server.ssl.SslSelectChannelConnector;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.ThreadPool;
 import org.eclipse.jetty.webapp.WebAppContext;
 
 import com.ibm.streams.operator.OperatorContext;
 import com.ibm.streams.operator.StreamingData;
+import com.ibm.streams.operator.management.OperatorManagement;
 import com.ibm.streamsx.inet.http.PathConversionHelper;
+import com.ibm.streamsx.inet.rest.ops.Functions;
+import com.ibm.streamsx.inet.rest.ops.PostTuple;
 import com.ibm.streamsx.inet.rest.servlets.ExposedPortsInfo;
 import com.ibm.streamsx.inet.rest.servlets.PortInfo;
 import com.ibm.streamsx.inet.rest.setup.ExposedPort;
@@ -52,7 +65,7 @@ import com.ibm.streamsx.inet.rest.setup.OperatorServletSetup;
  * Supports multiple servlet engines within the same PE,
  * one per defined port.
  */
-public class ServletEngine implements ServletEngineMBean {
+public class ServletEngine implements ServletEngineMBean, MBeanRegistration {
 	
     static Logger trace = Logger.getLogger(ServletEngine.class.getName());
 	
@@ -60,6 +73,14 @@ public class ServletEngine implements ServletEngineMBean {
 
 	public static final String CONTEXT_RESOURCE_BASE_PARAM = "contextResourceBase";
     public static final String CONTEXT_PARAM = "context";
+    
+    public static final String SSL_CERT_ALIAS_PARAM = "certificateAlias";
+    public static final String SSL_KEYSTORE_PARAM = "keyStore";
+    public static final String SSL_KEYSTORE_PASSWORD_PARAM = "keyStorePassword";
+    public static final String SSL_KEY_PASSWORD_PARAM = "keyPassword";
+    
+    public static final String SSL_TRUSTSTORE_PARAM = "trustStore";
+    public static final String SSL_TRUSTSTORE_PASSWORD_PARAM = "trustStorePassword";
 
     public static ServletEngineMBean getServletEngine(OperatorContext context) throws Exception {
 		
@@ -75,7 +96,7 @@ public class ServletEngine implements ServletEngineMBean {
         synchronized (syncMe) {
             if (!mbs.isRegistered(jetty)) {
                 try {
-                    mbs.registerMBean(new ServletEngine(context, portNumber),
+                    mbs.registerMBean(new ServletEngine(jetty, context, portNumber),
                             jetty);
                 } catch (InstanceAlreadyExistsException infe) {
                 }
@@ -92,24 +113,29 @@ public class ServletEngine implements ServletEngineMBean {
 	private boolean stopped;
     
     private final Server server;
+    private final ObjectName myObjectName;
+    private boolean isSSL;
+    // Jetty port.
+    private int localPort;
     private final ContextHandlerCollection handlers;
     private final Map<String, ServletContextHandler> contexts = Collections.synchronizedMap(
             new HashMap<String, ServletContextHandler>());
     
     private final List<ExposedPort> exposedPorts = Collections.synchronizedList(new ArrayList<ExposedPort>());
    
-    private ServletEngine(OperatorContext context, int portNumber) throws Exception {
-        
+    private ServletEngine(ObjectName myObjectName, OperatorContext context, int portNumber) throws Exception {
+        this.myObjectName = myObjectName;
 		this.startingContext = context;                
         tpe = newContextThreadPoolExecutor(context);
        
         server = new Server();
         handlers = new ContextHandlerCollection();
-
-        SelectChannelConnector connector0 = new SelectChannelConnector();
-        connector0.setPort(portNumber);
-        connector0.setMaxIdleTime(30000);
-        server.addConnector(connector0);
+        
+        if (context.getParameterNames().contains(SSL_CERT_ALIAS_PARAM))
+            setHTTPSConnector(context, server, portNumber);
+        else
+            setHTTPConnector(context, server, portNumber);
+        context.getMetrics().getCustomMetric("https").setValue(isSSL ? 1 : 0);
         
         server.setThreadPool(new ThreadPool() {
 
@@ -166,10 +192,84 @@ public class ServletEngine implements ServletEngineMBean {
         }
     }
     
+    /**
+     * Setup an HTTP connector.
+     */
+    private void setHTTPConnector(OperatorContext context, Server server, int portNumber) {
+        SelectChannelConnector connector = new SelectChannelConnector();
+        connector.setPort(portNumber);
+        connector.setMaxIdleTime(30000);
+        server.addConnector(connector);
+    }
+    
+    /**
+     * Setup an HTTPS connector.
+     */
+    private void setHTTPSConnector(OperatorContext context, Server server, int portNumber) {
+        SslContextFactory sslContextFactory = new SslContextFactory();
+        
+        String keyStorePath = context.getParameterValues(SSL_KEYSTORE_PARAM).get(0);
+        File keyStorePathFile = new File(keyStorePath);
+        if (!keyStorePathFile.isAbsolute())
+            keyStorePathFile = new File(context.getPE().getApplicationDirectory(), keyStorePath);
+        sslContextFactory.setKeyStorePath(keyStorePathFile.getAbsolutePath());
+        
+        String keyStorePassword = context.getParameterValues(SSL_KEYSTORE_PASSWORD_PARAM).get(0);
+        sslContextFactory.setKeyStorePassword(Functions.obfuscate(keyStorePassword));
+        
+        String keyPassword;
+        if (context.getParameterNames().contains(SSL_KEY_PASSWORD_PARAM))
+            keyPassword = context.getParameterValues(SSL_KEY_PASSWORD_PARAM).get(0);
+        else
+            keyPassword = keyStorePassword;
+   
+        sslContextFactory.setKeyManagerPassword(Functions.obfuscate(keyPassword));
+               
+        sslContextFactory.setAllowRenegotiate(false);
+        sslContextFactory.setIncludeProtocols("TLSv1.2", "TLSv1.1");
+        sslContextFactory.setExcludeProtocols("SSLv3");
+        
+        if (context.getParameterNames().contains(SSL_TRUSTSTORE_PARAM)) {
+            String trustStorePath = context.getParameterValues(SSL_TRUSTSTORE_PARAM).get(0);
+            sslContextFactory.setNeedClientAuth(true);
+            File trustStorePathFile = new File(trustStorePath);
+            if (!trustStorePathFile.isAbsolute())
+                trustStorePathFile = new File(context.getPE().getApplicationDirectory(), trustStorePath);
+            
+            sslContextFactory.setTrustStore(trustStorePath);
+            
+            String trustStorePassword = context.getParameterValues(SSL_TRUSTSTORE_PASSWORD_PARAM).get(0);
+            sslContextFactory.setTrustStorePassword(Functions.obfuscate(trustStorePassword));
+        }
+        
+        SslSelectChannelConnector connector = new SslSelectChannelConnector(sslContextFactory);
+        
+        connector.setPort(portNumber);
+        connector.setMaxIdleTime(30000);
+        server.addConnector(connector); 
+        
+        isSSL = true;
+    }
+
+
+        // Originally corePoolSize was set to a fixed: 32
+        // Jetty, however, creates its starting threads based on the number of
+        // available processors 2*(Runtime.getRuntime().availableProcessors()+3)/4    
+        // On large hosts (ppc64 with 24 processors, this can exceed 32)
+        // While many descriptions of the ThreadPoolExecuter make it seem that it will
+        // just add threads, testing has shown that this did not occur.
+        // Some literature states it will only add threads if the queue is full
+        // If Jetty never starts, then the queue will never fill, thus
+        // we need core threads to be set to at least as large as the number of threads
+        // that Jetty will start
+        // NOTE: This was based on examination of jetty 8.1.3 code
+        //       If the toolkit moves to jetty 9+ this could change
 	private ThreadPoolExecutor newContextThreadPoolExecutor(OperatorContext context) {
+                int jettyStartupThreads = 2*(Runtime.getRuntime().availableProcessors()+3)/4;      
+                trace.info("Creating ThreadPoolExecuter corePoolSize: 32+" + jettyStartupThreads);
 		return  new ThreadPoolExecutor(
-                32, // corePoolSize,
-                256, // maximumPoolSize,
+                32 + jettyStartupThreads, // corePoolSize,
+                Math.max(256, 32 + jettyStartupThreads), // maximumPoolSize,
                 60, //keepAliveTime,
                 TimeUnit.SECONDS,
                 new LinkedBlockingQueue<Runnable>(), // workQueue,
@@ -231,7 +331,7 @@ public class ServletEngine implements ServletEngineMBean {
 
 	 // Convert resourceBase file path to absPath if it is relative, if relative, it should be relative to application directory.
         URI baseConfigURI = context.getPE().getApplicationDirectory().toURI();
-	    return addStaticContext(context, ctxName, PathConversionHelper.convertToAbsPath(baseConfigURI, resourceBase));
+        return addStaticContext(context, ctxName, PathConversionHelper.convertToAbsPath(baseConfigURI, resourceBase));
 	}
 
     private ServletContextHandler addStaticContext(OperatorContext opContext, String ctxName, String resourceBase) throws Exception {
@@ -290,6 +390,9 @@ public class ServletEngine implements ServletEngineMBean {
 
         t.setDaemon(false);
         t.start();
+        
+        localPort = server.getConnectors()[0].getLocalPort();
+        startingContext.getMetrics().getCustomMetric("serverPort").setValue(localPort);
     }
     
    
@@ -340,6 +443,14 @@ public class ServletEngine implements ServletEngineMBean {
         	     ports.setAttribute("operator.conduit", conduit);
 
         	trace.info("Ports context: " + ports.getContextPath());
+        	
+            if (context.getParameterNames().contains(PostTuple.MAX_CONTENT_SIZE_PARAM)) {
+            	int maxContentSize = Integer.parseInt(context.getParameterValues(PostTuple.MAX_CONTENT_SIZE_PARAM).get(0)) * 1000;
+            	if (maxContentSize > 0) {
+            		trace.info("Maximum content size for context: " + ports.getContextPath() + " increased to " + maxContentSize);
+            		ports.setMaxFormContentSize(maxContentSize);
+            	}
+            }
         }
         
         // Automatically add info servlet for all output and input ports
@@ -372,5 +483,52 @@ public class ServletEngine implements ServletEngineMBean {
     public static class OperatorWebAppContext extends WebAppContext {
         public OperatorWebAppContext() {
         }
+    }
+
+    @Override
+    public void postDeregister() {
+    }
+
+    /**
+     * On PE shutdown unregister this MBean, allows unit tests
+     * to have multiple executions in the same JVM.
+     */
+    @Override
+    public void postRegister(Boolean registrationDone) {
+        
+        MBeanServerNotificationFilter unregisterPe = new MBeanServerNotificationFilter();
+        unregisterPe.disableAllTypes();
+        unregisterPe.disableAllTypes();
+        unregisterPe.enableObjectName(OperatorManagement.getPEName());
+        unregisterPe.enableType(MBeanServerNotification.UNREGISTRATION_NOTIFICATION);
+        
+        try {
+            ManagementFactory.getPlatformMBeanServer().addNotificationListener(
+                    MBeanServerDelegate.DELEGATE_NAME, new NotificationListener() {
+                        
+                        @Override
+                        public void handleNotification(Notification notification, Object handback) {
+                            try {
+                                ManagementFactory.getPlatformMBeanServer().unregisterMBean(myObjectName);
+                            } catch (MBeanRegistrationException e) {
+                                ;
+                            } catch (InstanceNotFoundException e) {
+                                ;
+                            }
+                        }
+                    }, unregisterPe, null);
+        } catch (InstanceNotFoundException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public void preDeregister() throws Exception {
+    }
+
+    @Override
+    public ObjectName preRegister(MBeanServer server, ObjectName name)
+            throws Exception {
+        return null;
     }
 }

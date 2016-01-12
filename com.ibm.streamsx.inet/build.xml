@@ -92,7 +92,7 @@ artifacts were left around and caused issues with the ant build.
 	<target name="cpp">
 		<exec executable="make" failonerror="true" dir="impl">
 			<arg value="-f" />
-			<arg value="Makefile.libftp" />
+			<arg value="Makefile" />
 			<arg value="all" />
 		</exec>
 	</target>
@@ -100,7 +100,7 @@ artifacts were left around and caused issues with the ant build.
 	<target name="cpp-clean">
 		<exec executable="make" failonerror="true" dir="impl">
 		  <arg value="-f" />
-		  <arg value="Makefile.libftp" />
+		  <arg value="Makefile" />
 		  <arg value="clean" />
 		</exec>
 	</target>
@@ -133,7 +133,7 @@ artifacts were left around and caused issues with the ant build.
 
 
 	<target name="compile" depends="init, maven-deps">
-		<javac srcdir="${src.dir}" destdir="${build.dir}" debug="true" includeantruntime="no" source="1.6" excludes="com/ibm/streamsx/inet/rest/test/**">
+		<javac srcdir="${src.dir}" destdir="${build.dir}" debug="true" includeantruntime="no" source="1.7" excludes="com/ibm/streamsx/inet/rest/test/**">
 			<classpath>
 				<path refid="cp.compile" />
 			</classpath>
@@ -163,7 +163,7 @@ artifacts were left around and caused issues with the ant build.
 			</classpath>
 		</javac>
 
-		<junit printsummary="yes" haltonfailure="yes">
+		<junit printsummary="yes" haltonfailure="yes" fork="yes">
 			<classpath>
 				<pathelement location="${test.build.dir}" />
 				<pathelement location="${impl.lib.dir}/${jarfile}" />

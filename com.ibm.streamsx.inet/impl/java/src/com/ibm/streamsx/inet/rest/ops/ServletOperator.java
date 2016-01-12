@@ -8,6 +8,9 @@ import com.ibm.streams.operator.AbstractOperator;
 import com.ibm.streams.operator.OperatorContext;
 import com.ibm.streams.operator.OperatorContext.ContextCheck;
 import com.ibm.streams.operator.compile.OperatorContextChecker;
+import com.ibm.streams.operator.metrics.Metric;
+import com.ibm.streams.operator.metrics.Metric.Kind;
+import com.ibm.streams.operator.model.CustomMetric;
 import com.ibm.streams.operator.model.Parameter;
 import com.ibm.streamsx.inet.rest.engine.ServletEngine;
 import com.ibm.streamsx.inet.rest.engine.ServletEngineMBean;
@@ -68,10 +71,53 @@ public abstract class ServletOperator extends AbstractOperator {
 	@Parameter(optional=true, description=CRB_DESC)
 	public void setContextResourceBase(String base) {}
 	
+	@Parameter(optional=true, description="Alias of the certificate to use in the key store. "
+	        + "When this parameter is set all connections use HTTPS.")
+	public void setCertificateAlias(String ca) {}
+	@Parameter(optional=true, description="URL to the key store containing the certificate. "
+	        + "If a relative file path then it is taken as relative to the application directory.")
+	public void setKeyStore(String ks) {}
+	@Parameter(optional=true, description="Password to the key store.")
+	public void setKeyStorePassword(String ksp) {}
+	@Parameter(optional=true, description="Password to the certificate. If not provided, defaults to the value of `keyStorePassword`.")
+	public void setKeyPassword(String kp) {}
+	
+        @Parameter(optional = true, description = "URL to the trust store containing client certificates. "
+            + "If a relative file path then it is taken as relative to the application directory. "
+            + "When this parameter is set, client authentication is required.")
+        public void setTrustStore(String ks) {}
+
+        @Parameter(optional = true, description = "Password to the trust store.")
+        public void setTrustStorePassword(String ksp) {}
+        
+        // Creates a metric that the ServletEngine will fill in.
+        private Metric serverPort;
+        @CustomMetric(description="Jetty (HTTP/HTTPS) server port", kind=Kind.GAUGE)
+        public void setServerPort(Metric metric) {this.serverPort = metric;}
+        public Metric getServerPort() { return serverPort; }
+
+        // Creates a metric that the ServletEngine will fill in.
+        private Metric https;
+        @CustomMetric(description="Jetty SSL/TLS status: 0=HTTP, 1=HTTPS", kind=Kind.GAUGE)
+        public void setHttps(Metric metric) {this.https = metric;}
+        public Metric getHttps() { return https; }
+	
 	@ContextCheck
 	public static void checkContextParameters(OperatorContextChecker checker) {	
 		checker.checkDependentParameters("context", "contextResourceBase");
 		checker.checkDependentParameters("contextResourceBase", "context");
+		
+		checker.checkDependentParameters(ServletEngine.SSL_CERT_ALIAS_PARAM,
+		        ServletEngine.SSL_KEYSTORE_PARAM,
+		        ServletEngine.SSL_KEYSTORE_PASSWORD_PARAM);
+		
+		checker.checkDependentParameters(ServletEngine.SSL_KEY_PASSWORD_PARAM,
+		        ServletEngine.SSL_CERT_ALIAS_PARAM);
+		
+                checker.checkDependentParameters(ServletEngine.SSL_TRUSTSTORE_PARAM,
+                        ServletEngine.SSL_TRUSTSTORE_PASSWORD_PARAM,
+                        ServletEngine.SSL_CERT_ALIAS_PARAM);
+		
 	}
 	
 	static final String CONTEXT_DESC = "Define a URL context path that maps to the resources defined by" + 

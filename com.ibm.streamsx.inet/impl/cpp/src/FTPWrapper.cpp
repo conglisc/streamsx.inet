@@ -1,7 +1,7 @@
 /* Copyright (C) 2013-2014, International Business Machines Corporation */
 /* All Rights Reserved */
 
-#include "../../include/libftp/FTPWrapper.h"
+#include "FTPWrapper.h"
 #include <SPL/Runtime/Common/RuntimeException.h>
 #include <cstdio>
 #include <iostream>
@@ -145,7 +145,7 @@ void FTPWrapper::initialize() {
 				}
 			}
 			if (CURLE_OK == res) {
-				curl_ftpssl sslOption = CURLFTPSSL_NONE;
+				curl_ftpssl sslOption; 
 				switch (protocol) {
 				case ftpSSLTry:
 					sslOption = CURLFTPSSL_TRY;
@@ -156,6 +156,8 @@ void FTPWrapper::initialize() {
 				case ftpSSLAll:
 					sslOption = CURLFTPSSL_ALL;
 					break;
+                default:
+                    sslOption = CURLFTPSSL_NONE;
 				}
 				if (sslOption != CURLFTPSSL_NONE) {
 					action = "CURLOPT_FTP_SSL";

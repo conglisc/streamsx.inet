@@ -1,8 +1,17 @@
 # Copyright (C) 2013-2014, International Business Machines Corporation
 # All Rights Reserved
 $(info ************************************************************************)
-$(info ***  make libftp                                                     ***)
+$(info ***  make libinettoolkit                                             ***)
 $(info ************************************************************************)
+
+# Handle PPC platforms that require toolchain Compiler
+ifeq ($(CXX),g++)
+  PLATFORM := $(shell uname -i)
+  ifeq ($(PLATFORM),ppc64)
+    CXX=/opt/at7.0/bin/g++
+  endif
+endif
+
 
 # InfoSphere Streams Compiler/Linker Options
 SPL_PKGCFG=$(realpath $(STREAMS_INSTALL)/bin/dst-pe-pkg-config.sh)
@@ -19,10 +28,10 @@ SPL_LINK_OPTIONS = $(shell $(SPL_PKGCFG) --libs $(SPL_PKG))
 # Folders
 # -----------------------------------------------------------------------------
 TRG := .
-INC:= $(TRG)/cpp/include/libftp
+INC:= $(TRG)/cpp/include
 LIB := $(TRG)/lib
-OBJ := $(TRG)/cpp/obj/libftp
-SRC := $(TRG)/cpp/src/libftp
+OBJ := $(TRG)/cpp/bin
+SRC := $(TRG)/cpp/src
 
 # -----------------------------------------------------------------------------
 # phony targets are targets being not in the filesystem but are always "active"
@@ -34,7 +43,7 @@ SRC := $(TRG)/cpp/src/libftp
 # Library
 # -----------------------------------------------------------------------------
 
-LIBRARY := $(LIB)/libftpwrapper.so
+LIBRARY := $(LIB)/libinettoolkit.so
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -43,7 +52,7 @@ LIBRARY := $(LIB)/libftpwrapper.so
 INCLUDES = $(wildcard $(INC)/*.h) $(wildcard $(SRC)/*.h) 
 SOURCES  = $(wildcard $(SRC)/*.cpp)
 OBJECTS  = $(patsubst $(SRC)/%.cpp,$(OBJ)/%.o,$(SOURCES))
-CXXFLAGS := -O3 $(SPL_COMPILE_OPTIONS) 
+CXXFLAGS := -O3 $(SPL_COMPILE_OPTIONS) -Werror -Wall
 LINKFLAGS := -shared $(SPL_LINK_OPTIONS)
 
 all: clean build clean_objects
@@ -55,7 +64,7 @@ $(LIB) $(OBJ):
 	
 $(OBJ)/%.o: $(SRC)/%.cpp $(INCLUDES)
 	@echo Compiling '$<' ...
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -c $< -o $@ -I $(INC)
 
 $(LIBRARY): $(LIB) $(OBJ) $(OBJECTS)
 	@echo Building C++ shared library '$@'

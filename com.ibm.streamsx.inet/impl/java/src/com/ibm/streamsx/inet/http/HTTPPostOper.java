@@ -46,7 +46,7 @@ import com.ibm.streamsx.inet.http.HTTPRequest.RequestType;
 		     "Tuple structure must conform to the [HTTPResponse] type specified in this namespace."))
 @PrimitiveOperator(name=HTTPPostOper.OPER_NAME, description=HTTPPostOper.DESC)
 @Libraries(value={"opt/downloaded/*"})
-@Icons(location32="impl/java/icons/HTTPPost_32.gif", location16="impl/java/icons/HTTPPost_16.gif")
+@Icons(location32="icons/HTTPPost_32.gif", location16="icons/HTTPPost_16.gif")
 public class HTTPPostOper extends AbstractOperator  
 {
 	static final String CLASS_NAME="com.ibm.streamsx.inet.http.HTTPPostOper";
@@ -72,6 +72,9 @@ public class HTTPPostOper extends AbstractOperator
 	private List<String> authenticationProperties = new ArrayList<String>();
 	
 	private String headerContentType = MIME_FORM;
+	private boolean acceptAllCertificates = false;
+
+	private List<String> extraHeaders = new ArrayList<String>();
 
 	@Parameter(optional= false, description="URL to connect to")
 	public void setUrl(String url) {
@@ -108,6 +111,17 @@ public class HTTPPostOper extends AbstractOperator
 			" Note that if a value other than the above mentioned ones is specified, the input stream can only have a single attribute.")
 	public void setHeaderContentType(String val) {
 		this.headerContentType = val;
+	}
+	@Parameter(optional=true,
+			description="Extra headers to send with request, format is \\\"Header-Name: value\\\".")
+	public void setExtraHeaders(List<String> val) {
+		this.extraHeaders = val;
+	}
+	@Parameter(optional=true, 
+			description="Accept all SSL certificates, even those that are self-signed. " +
+			"Setting this option will allow potentially insecure connections. Default is false.")
+	public void setAcceptAllCertificates(boolean val) {
+		this.acceptAllCertificates = val;
 	}
 	
 	//consistent region checks
@@ -159,6 +173,7 @@ public class HTTPPostOper extends AbstractOperator
 		HTTPRequest req = new HTTPRequest(url);
 		req.setHeader("Content-Type", headerContentType);
 		req.setType(RequestType.POST);
+		req.setInsecure(acceptAllCertificates);
 
 		if(headerContentType.equals(MIME_FORM)) {
 			Map<String, String> params = new HashMap<String, String>();
@@ -173,6 +188,11 @@ public class HTTPPostOper extends AbstractOperator
 		}
 		else {
 			req.setParams(tuple.getObject(schema.getAttribute(0).getName()).toString());
+		}
+
+		Map<String, String> headerMap = HTTPUtils.getHeaderMap(extraHeaders);
+		for(Map.Entry<String, String> header : headerMap.entrySet()) {
+			req.setHeader(header.getKey(), header.getValue());
 		}
 
 		HTTPResponse resp = null;
@@ -227,9 +247,9 @@ public class HTTPPostOper extends AbstractOperator
 			if(resp.getErrorStreamData()!=null)
 				otup.setString("errorMessage", resp.getErrorStreamData());
 	
-			if(resp.getOutStreamData() != null) {
-				otup.setString("data", resp.getOutStreamData());
-				otup.setInt("dataSize", resp.getOutStreamData().length());
+			if(resp.getOutputData() != null) {
+				otup.setString("data", resp.getOutputData());
+				otup.setInt("dataSize", resp.getOutputData().length());
 			}
 	
 			otup.setInt("responseCode", resp.getResponseCode());

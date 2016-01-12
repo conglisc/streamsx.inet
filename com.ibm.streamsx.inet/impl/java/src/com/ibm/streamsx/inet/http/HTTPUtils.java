@@ -12,8 +12,33 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.logging.Logger;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+
+import org.apache.http.client.HttpClient;
+import org.apache.http.conn.ClientConnectionManager;
+import org.apache.http.conn.scheme.Scheme;
+import org.apache.http.conn.scheme.SchemeRegistry;
+import org.apache.http.conn.ssl.AllowAllHostnameVerifier;
+import org.apache.http.conn.ssl.SSLSocketFactory;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.impl.conn.BasicClientConnectionManager;
+
+import com.ibm.streams.operator.logging.TraceLevel;
 
 public class HTTPUtils {
+
+	static final String CLASS_NAME="com.ibm.streamsx.inet.http.HTTPUtils";
+	private static Logger trace = Logger.getLogger(CLASS_NAME);
 
 	public static HttpURLConnection getNewConnection(String url) 
 			throws IOException {
@@ -38,5 +63,45 @@ public class HTTPUtils {
 			//ignore
 		}
 		return buf.toString();
+	}
+
+	public static Map<String, String> getHeaderMap(List<String> headers) {
+		if(headers == null) return Collections.emptyMap();
+		Map<String, String> headerMap = new HashMap<String, String>(headers.size());
+		for(String header : headers) {
+			String[] headerParts = header.split(":\\s*", 2);
+			if(headerParts.length < 2) {
+				trace.log(TraceLevel.ERROR, "No ':' found in extraHeaders element '" + header + "', skipping");
+				continue;
+			}
+			String headerName = headerParts[0];
+			String headerValue = headerParts[1];
+			headerMap.put(headerName, headerValue);
+		}
+		return headerMap;
+	}
+	
+	public static HttpClient getHttpClientWithNoSSLValidation() throws Exception {
+		SSLContext sslContext = SSLContext.getInstance("SSL");
+		sslContext.init(null, new TrustManager[] {
+			new X509TrustManager() {
+				public X509Certificate[] getAcceptedIssuers() {
+					return null;
+				}
+				public void checkClientTrusted(X509Certificate[] certs, String authType) {
+				}
+				public void checkServerTrusted(X509Certificate[] certs, String authType) {
+				}
+			}
+		}, new SecureRandom());
+
+		SSLSocketFactory sf = new SSLSocketFactory(sslContext, new AllowAllHostnameVerifier());
+		Scheme httpsScheme = new Scheme("https", 443, sf);
+		SchemeRegistry schemeRegistry = new SchemeRegistry();
+		schemeRegistry.register(httpsScheme);
+
+		ClientConnectionManager cm = new BasicClientConnectionManager(schemeRegistry);
+
+		return new DefaultHttpClient(cm);
 	}
 }
